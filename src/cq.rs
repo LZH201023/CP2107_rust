@@ -170,7 +170,10 @@ pub fn is_in_table(cm: G1, t: &[Fr], n_total: usize, srs: &SRS, n: usize, f: &[F
     let e1 = Bls12_381::pairing(&a, &(srs.tx2));
     let e2 = Bls12_381::pairing(&qa, &(srs.zx2));
     let e3 = Bls12_381::pairing(m.sub(a.mul(&beta)), &(srs.srs2[0]));
-    let check = e1.eq(&e2.add(&e3));
+    let mut check = e1.eq(&e2.add(&e3));
+    let e1 = Bls12_381::pairing(&b0, &srs.srs2[n_total - n + 1]);
+    let e2 = Bls12_381::pairing(&p, &srs.srs2[0]);
+    check = check && e1.eq(&e2);
     verifier_time += verifier_timer.elapsed();
     if !check {
         println!("Verifier rejects");

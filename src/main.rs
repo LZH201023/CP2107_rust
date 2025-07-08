@@ -14,7 +14,7 @@ fn main() {
     let t: Vec<Fr> = (0..n_total).map(|_| Fr::rand(&mut rng)).collect();
     
     // f is a subset of t
-    let f: Vec<Fr> = t[..n].to_vec();
+    let mut f: Vec<Fr> = t[..n].to_vec();
     
     // iNTT on f
     let fx: Vec<Fr> = intt(&f, n, &None);
