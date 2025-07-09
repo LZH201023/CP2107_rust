@@ -6,10 +6,19 @@ edition = "2024"
 [dependencies]
 ark-ff = "0.4"
 ark-ec = "0.4"
-ark-poly = "0.4"
 ark-bls12-381 = "0.4"
 ark-std = "0.4"
 rand = "0.8"
 ark-poly-commit = "0.4"
-ark-serialize = "0.4"
-num-integer = "0.1.46"
+
+[profile.dev]
+opt-level = 2         # Speeds up computation in dev mode
+debug = true          # Keep debug info
+overflow-checks = false
+lto = false
+
+[profile.release]
+opt-level = 3         # Maximum optimization
+debug = false
+lto = true            # Link Time Optimization
+codegen-units = 1     # Better optimization at cost of compile speed
