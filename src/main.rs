@@ -7,7 +7,7 @@ mod ntt;
 
 fn main() {
     let mut rng = test_rng();
-    let n_total = 32;
+    let n_total = 128;
     let n = 4;
     
     // Generate t

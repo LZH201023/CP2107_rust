@@ -167,22 +167,6 @@ pub fn is_in_table(cm: G1, t: &[Fr], n_total: usize, srs: &SRS, n: usize, f: &[F
     println!("Prover's commitment p: {:?}", p);
 
     verifier_timer = Instant::now();
-    let e1 = Bls12_381::pairing(&a, &(srs.tx2));
-    let e2 = Bls12_381::pairing(&qa, &(srs.zx2));
-    let e3 = Bls12_381::pairing(m.sub(a.mul(&beta)), &(srs.srs2[0]));
-    let mut check = e1.eq(&e2.add(&e3));
-    let e1 = Bls12_381::pairing(&b0, &srs.srs2[n_total - n + 1]);
-    let e2 = Bls12_381::pairing(&p, &srs.srs2[0]);
-    check = check && e1.eq(&e2);
-    verifier_time += verifier_timer.elapsed();
-    if !check {
-        println!("Verifier rejects");
-        println!("Prover time: {:.2?}", prover_time);
-        println!("Verifier time: {:.2?}", verifier_time);
-        return;
-    }
-
-    verifier_timer = Instant::now();
     let gamma = Fr::rand(&mut rng);
     verifier_time += verifier_timer.elapsed();
     println!("Verifier: gamma = {:?}", &gamma);
@@ -229,19 +213,6 @@ pub fn is_in_table(cm: G1, t: &[Fr], n_total: usize, srs: &SRS, n: usize, f: &[F
     prover_time += prover_timer.elapsed();
     println!("Prover's commitment pi: {:?}", pi);
 
-    verifier_timer = Instant::now();
-    let c = b0 + cm * &eta + qb * &coefficient;
-    let e1 = Bls12_381::pairing(c - srs.srs1[0] * v_v + pi * &gamma, srs.srs2[0]);
-    let e2 = Bls12_381::pairing(pi, srs.srs2[1]);
-    let check = e1 == e2;
-    verifier_time += verifier_timer.elapsed();
-    if !check {
-        println!("Verifier rejects");
-        println!("Prover time: {:.2?}", prover_time);
-        println!("Verifier time: {:.2?}", verifier_time);
-        return;
-    }
-
     prover_timer = Instant::now();
     let mut a0 = G1::zero();
     for (&idx, &val) in &A {
@@ -251,9 +222,16 @@ pub fn is_in_table(cm: G1, t: &[Fr], n_total: usize, srs: &SRS, n: usize, f: &[F
     println!("Prover's commitment a0: {:?}", a0);
 
     verifier_timer = Instant::now();
-    let e1 = Bls12_381::pairing(a - srs.srs1[0] * &a_0, srs.srs2[0]);
-    let e2 = Bls12_381::pairing(a0, srs.srs2[1]);
-    let check = e1 == e2;
+    let c = b0 + cm * &eta + qb * &coefficient;
+    let alp: Fr = Fr::rand(&mut rng);
+    let alp2 = alp.mul(&alp);
+    let alp3 = alp2.mul(&alp);
+    let e1 = Bls12_381::pairing(a, srs.tx2);
+    let e2 = Bls12_381::pairing(qa, srs.zx2);
+    let e3 = Bls12_381::pairing(b0.mul(&alp), srs.srs2[n_total - n + 1]);
+    let e4 = Bls12_381::pairing((c - srs.srs1[0].mul(&v_v) + pi.mul(&gamma)).mul(&alp2) + (a - srs.srs1[0].mul(&a_0)).mul(&alp3) - p.mul(&alp) - m + a.mul(&beta), srs.srs2[0]);
+    let e5 = Bls12_381::pairing(pi.mul(&alp2) + a0.mul(&alp3), srs.srs2[1]);
+    let check = (e1 + e3 + e4) == (e2 + e5);
     verifier_time += verifier_timer.elapsed();
     if !check {
         println!("Verifier rejects");
