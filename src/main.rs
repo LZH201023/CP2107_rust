@@ -7,8 +7,8 @@ mod ntt;
 
 fn main() {
     let mut rng = test_rng();
-    let n_total = 128;
-    let n = 4;
+    let n_total = 1024;
+    let n = 16;
     
     // Generate t
     let t: Vec<Fr> = (0..n_total).map(|_| Fr::rand(&mut rng)).collect();

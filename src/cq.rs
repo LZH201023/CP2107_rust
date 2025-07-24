@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Div;
 use std::time::Instant;
 use ark_bls12_381::{Bls12_381, Fr, G1Projective as G1, G2Projective as G2};
 use ark_ec::Group;
@@ -6,6 +7,7 @@ use ark_ec::pairing::Pairing;
 use ark_ff::{UniformRand, Field, Zero, One};
 use rand::thread_rng;
 use ark_std::{log2, ops::{Add, Mul, Sub}};
+use log::log;
 use crate::ntt::*;
 pub struct SRS {
     n: usize,
@@ -140,80 +142,14 @@ pub fn is_in_table(cm: G1, t: &[Fr], n_total: usize, srs: &SRS, n: usize, f: &[F
     }
     println!("Prover's commitment qa: {:?}", qa);
 
-    let mut B = Vec::with_capacity(n);
-    for i in 0..n {
-        B.push(f[i].add(&beta).inverse().unwrap());
-    }
-    let mut ge = Some(-Fr::ONE);
-    let log_n = log2(n);
-    for _ in 1..log_n {
-        ge = ge.and_then(|x| x.sqrt());
-    }
-    let bx = intt(&B, n, &ge);
-    let b0 = mul_vec(&(srs.srs1), &bx[1..], n - 1);
-    println!("Prover's commitment b0: {:?}", b0);
-
-    let mut fx = intt(f, n, &None);
-    fx[0] += &beta;
-    let pdt = poly_multi(&bx, n - 1, &fx, n - 1);
-    fx[0] -= &beta;
-    let mut q_b = vec![Fr::ZERO; n - 1];
-    poly_div_z(&pdt, 2 * n - 2, n, q_b.as_mut_slice());
-    let qb = mul_vec(&srs.srs1, &q_b, n - 1);
-    println!("Prover's commitment qb: {:?}", qb);
-
-    let p = mul_vec(&srs.srs1[n_total - n + 1..], &bx[1..], n - 1);
-    prover_time += prover_timer.elapsed();
-    println!("Prover's commitment p: {:?}", p);
-
-    verifier_timer = Instant::now();
-    let gamma = Fr::rand(&mut rng);
-    verifier_time += verifier_timer.elapsed();
-    println!("Verifier: gamma = {:?}", &gamma);
-
-    prover_timer = Instant::now();
-    let b0g = eval_poly(&bx[1..], n - 2, &gamma);
-    let fg = eval_poly(&fx, n - 1, &gamma);
     let ni = Fr::from(n_total as u64).inverse().unwrap();
     let mut a_0 = Fr::zero();
     for (_, &v) in &A {
-        a_0 += v .mul(&ni);
+        a_0 += v.mul(&ni);
     }
-    prover_time += prover_timer.elapsed();
-    println!("Prover: B0(gamma) = {:?}\nf(gamma) = {:?}\nA(0) = {:?}", &b0g, &fg, &a_0);
+    let sum = a_0.mul(Fr::from(n_total as u64));
+    println!("Prover: S = {:?}", &sum);
 
-    verifier_timer = Instant::now();
-    let b_0 = Fr::from(n_total as u64) * &a_0 * (Fr::from(n as u64).inverse().unwrap());
-    let coefficient = gamma.pow(&[n as u64]);
-    let qbg = ((b0g * gamma + b_0) * (fg + &beta) - Fr::one()) / (coefficient - Fr::one());
-    let eta = Fr::rand(&mut rng);
-    let v_v = &b0g + &eta.mul(&fg) + eta.square() * qbg;
-    verifier_time += verifier_timer.elapsed();
-    println!("Verifier: eta = {:?}", &eta);
-
-    prover_timer = Instant::now();
-    let v_p = &b0g + &eta.mul(&fg) + eta.square() * qbg;
-    let coefficient = eta.square();
-    for i in 0..(n - 1) {
-        fx[i] *= &eta;
-        fx[i] += &bx[i + 1];
-        fx[i] += coefficient.mul(&q_b[i]);
-    }
-    fx[n - 1] *= eta;
-    fx[0] -= v_p;
-
-    let mut rem = fx[n - 1].clone();
-    for i in (0..n - 1).rev() {
-        let temp = fx[i].clone();
-        fx[i] = rem;
-        rem = temp + rem.mul(&gamma);
-    }
-
-    let pi = mul_vec(&srs.srs1, &fx, n - 1);
-    prover_time += prover_timer.elapsed();
-    println!("Prover's commitment pi: {:?}", pi);
-
-    prover_timer = Instant::now();
     let mut a0 = G1::zero();
     for (&idx, &val) in &A {
         a0 += &srs.lps1[idx].mul(&val);
@@ -222,17 +158,201 @@ pub fn is_in_table(cm: G1, t: &[Fr], n_total: usize, srs: &SRS, n: usize, f: &[F
     println!("Prover's commitment a0: {:?}", a0);
 
     verifier_timer = Instant::now();
-    let c = b0 + cm * &eta + qb * &coefficient;
-    let alp: Fr = Fr::rand(&mut rng);
-    let alp2 = alp.mul(&alp);
-    let alp3 = alp2.mul(&alp);
-    let e1 = Bls12_381::pairing(a, srs.tx2);
-    let e2 = Bls12_381::pairing(qa, srs.zx2);
-    let e3 = Bls12_381::pairing(b0.mul(&alp), srs.srs2[n_total - n + 1]);
-    let e4 = Bls12_381::pairing((c - srs.srs1[0].mul(&v_v) + pi.mul(&gamma)).mul(&alp2) + (a - srs.srs1[0].mul(&a_0)).mul(&alp3) - p.mul(&alp) - m + a.mul(&beta), srs.srs2[0]);
-    let e5 = Bls12_381::pairing(pi.mul(&alp2) + a0.mul(&alp3), srs.srs2[1]);
-    let check = (e1 + e3 + e4) == (e2 + e5);
+    let mut check = true;
+    a_0 = sum.div(Fr::from(n_total as u64));
+    let mut e1 = Bls12_381::pairing(a, srs.tx2);
+    let mut e2 = Bls12_381::pairing(qa, srs.zx2);
+    let mut e3 = Bls12_381::pairing(m.sub(a.mul(&beta)), srs.srs2[0]);
+    check = check &&  (e1 == e2.add(&e3));
+    e1 = Bls12_381::pairing(a.sub(srs.srs1[0].mul(&a_0)), srs.srs2[0]);
+    e2 = Bls12_381::pairing(a0, srs.srs2[1]);
+    check = check && (e1 == e2);
     verifier_time += verifier_timer.elapsed();
+    if !check {
+        println!("Verifier rejects");
+        println!("Prover time: {:.2?}", prover_time);
+        println!("Verifier time: {:.2?}", verifier_time);
+        return;
+    }
+
+    prover_timer = Instant::now();
+    let mut g: Vec<Fr> = Vec::with_capacity(n);
+    for i in 0..n {
+        g.push(f[i].add(&beta).inverse().unwrap());
+    }
+    let cm_g = commit(&g, n);
+
+    let mut helper: Vec<Fr> = Vec::with_capacity(n);
+    for i in 0..n {
+        helper.push(g[i].clone());
+    }
+    prover_time += prover_timer.elapsed();
+
+    //Sum-check on g
+    println!("\nSumCheck1 starts");
+    let log_n: usize = log2(n) as usize;
+    let mut len = n;
+    let mut current_sum: Fr = sum;
+    let mut challenges: Vec<Fr> = Vec::with_capacity(log_n);
+    for i in 0..log_n {
+        prover_timer = Instant::now();
+        let val0: Fr = helper[0..len / 2].iter().sum();
+        let val1: Fr = helper[len / 2..len].iter().sum();
+        len /= 2;
+        println!("Iteration {}\nProver: {:?}\n{:?}", i, &val0, &val1);
+        prover_time += prover_timer.elapsed();
+
+        verifier_timer = Instant::now();
+        check = check && (val0.add(&val1) == current_sum);
+        if !check {
+            verifier_time += verifier_timer.elapsed();
+            println!("Verifier rejects");
+            println!("Prover time: {:.2?}", prover_time);
+            println!("Verifier time: {:.2?}", verifier_time);
+            return;
+        }
+        let challenge: Fr = Fr::rand(&mut rng);
+        println!("Verifier's challenge: {:?}", &challenge);
+        challenges.push(challenge);
+        current_sum = challenge.mul(&val1).add(val0.mul(Fr::ONE.sub(&challenge)));
+        verifier_time += verifier_timer.elapsed();
+
+        prover_timer = Instant::now();
+        let mc = Fr::ONE.sub(&challenge);
+        for i in 0..len {
+            helper[i] = mc.mul(&helper[i]).add(challenge.mul(&helper[i + len]));
+        }
+        prover_time += prover_timer.elapsed();
+    }
+
+    //evaluate h at the random point (should be equal to current_sum)
+    prover_timer = Instant::now();
+    let witness = create_witness(&g, n, &challenges);
+    println!("Evaluation: {:?}\nWitness: {:?}", &helper[0], &witness);
+    prover_time += prover_timer.elapsed();
+
+    verifier_timer = Instant::now();
+    check = check && verify_evaluation(&g, n, &challenges, &helper[0]) && (helper[0] == current_sum);
+    verifier_time += verifier_timer.elapsed();
+    if !check {
+        println!("Verifier rejects");
+        println!("Prover time: {:.2?}", prover_time);
+        println!("Verifier time: {:.2?}", verifier_time);
+        return;
+    }
+
+
+    verifier_timer = Instant::now();
+    let mut rr: Vec<Fr> = Vec::with_capacity(log_n);
+    let mut r: Fr;
+    println!("\nVerifier randomness :");
+    for _ in 0..log_n {
+        r = Fr::rand(&mut rng);
+        println!("{:?}", &r);
+        rr.push(r);
+    }
+    verifier_time = verifier_timer.elapsed();
+
+    prover_timer = Instant::now();
+    let mut h: Vec<Fr> = vec![Fr::ZERO; n];
+    h[0] = Fr::ONE.sub(&rr[0]);
+    h[1] = rr[0].clone();
+    let mut step = 2;
+    for i in 1..log_n {
+        for j in (0..step).rev() {
+            h[2 * j + 1] = h[j].mul(&rr[i]);
+            h[2 * j] = h[j].mul(Fr::ONE.sub(&rr[i]));
+        }
+        step *= 2;
+    }
+
+    let mut helper1: Vec<Fr> = Vec::with_capacity(n);
+    let mut helper2: Vec<Fr> = Vec::with_capacity(n);
+    let mut helper3: Vec<Fr> = Vec::with_capacity(n);
+    for i in 0..n {
+        helper1.push(h[i].clone());
+        helper2.push(g[i].clone());
+        helper3.push(f[i].clone());
+    }
+    prover_time += prover_timer.elapsed();
+
+    //final sum-check
+    println!("\nSumCheck2 starts");
+    len = n;
+    let mut challenges: Vec<Fr> = Vec::with_capacity(log_n);
+    current_sum = Fr::ONE;
+    for j in 0..log_n {
+        prover_timer = Instant::now();
+        len /= 2;
+        let mut val0: Fr = Fr::ZERO;
+        let mut val1: Fr = Fr::ZERO;
+        let mut val2: Fr = Fr::ZERO;
+        let mut valm1: Fr = Fr::ZERO;
+        for i in 0..len {
+            val0 += helper1[i].mul(&helper2[i]).mul(beta.add(&helper3[i]));
+            val1 += helper1[i + len].mul(&helper2[i + len]).mul(beta.add(&helper3[i + len]));
+            val2 += Fr::from(2u64).mul(&helper1[i + len]).sub(&helper1[i])
+                .mul(&Fr::from(2u64).mul(&helper2[i + len]).sub(&helper2[i]))
+                .mul(&Fr::from(2u64).mul(&helper3[i + len]).sub(&helper3[i]).add(&beta));
+            valm1 += Fr::from(2u64).mul(&helper1[i]).sub(&helper1[i + len])
+                .mul(&Fr::from(2u64).mul(&helper2[i]).sub(&helper2[i + len]))
+                .mul(&Fr::from(2u64).mul(&helper3[i]).sub(&helper3[i + len]).add(&beta));
+        }
+        println!("Iteration {}\nProver: {:?}\n{:?}\n{:?}\n{:?}", j, &val0, &val1, &val2, &valm1);
+        prover_time += prover_timer.elapsed();
+
+        verifier_timer = Instant::now();
+        check = check && (val0.add(&val1) == current_sum);
+        if !check {
+            verifier_time += verifier_timer.elapsed();
+            println!("Verifier rejects");
+            println!("Prover time: {:.2?}", prover_time);
+            println!("Verifier time: {:.2?}", verifier_time);
+            return;
+        }
+        let challenge: Fr = Fr::rand(&mut rng);
+        println!("Verifier's challenge: {:?}", &challenge);
+        challenges.push(challenge);
+        let c = val1.add(&valm1).sub(Fr::from(2u64).mul(&val0)).div(Fr::from(2u64));
+        let d = val2.sub(&val1).add(&valm1).sub(&val0).sub(Fr::from(4u64).mul(&c)).div(Fr::from(6u64));
+        let b = val1.sub(&val0).sub(&c).sub(&d);
+        let mut temp = challenge.clone();
+        current_sum = val0;
+        current_sum += b.mul(&temp);
+        temp *= &challenge;
+        current_sum += c.mul(&temp);
+        current_sum += d.mul(temp.mul(&challenge));
+        verifier_time += verifier_timer.elapsed();
+
+        prover_timer = Instant::now();
+        let mc = Fr::ONE.sub(&challenge);
+        for i in 0..len {
+            helper1[i] = mc.mul(&helper1[i]).add(challenge.mul(&helper1[i + len]));
+            helper2[i] = mc.mul(&helper2[i]).add(challenge.mul(&helper2[i + len]));
+            helper3[i] = mc.mul(&helper3[i]).add(challenge.mul(&helper3[i + len]));
+        }
+        prover_time += prover_timer.elapsed();
+    }
+
+    //evaluate g, f at the random point
+    prover_timer = Instant::now();
+    let witness1 = create_witness(&g, n, &challenges);
+    let witness2 = create_witness(&f, n, &challenges);
+
+    println!("Evaluation of g, f: {:?}\n{:?}\nWitness: {:?}\n{:?}", &helper2[0], &helper3[0], &witness1, &witness2);
+    prover_time += prover_timer.elapsed();
+
+    verifier_timer = Instant::now();
+    check = check && verify_evaluation(&g, n, &challenges, &helper2[0])
+        && verify_evaluation(&f, n, &challenges, &helper3[0]);
+    let mut eq_val = Fr::ONE;
+    for i in 0..log_n {
+        eq_val *= Fr::ONE.sub(&challenges[i]).sub(&rr[i]).add(Fr::from(2u64).mul(&challenges[i]).mul(&rr[i]));
+    }
+    eq_val = helper1[0].clone();
+    check = check && (eq_val.mul(&helper2[0]).mul(beta.add(&helper3[0])) == current_sum);
+    verifier_time += verifier_timer.elapsed();
+
     if !check {
         println!("Verifier rejects");
         println!("Prover time: {:.2?}", prover_time);
@@ -306,4 +426,17 @@ pub fn mul_vec(g: &[G1], s: &[Fr], n: usize) -> G1 {
         c += g[i].mul(&s[i]);
     }
     c
+}
+
+//A dummy PCS
+fn commit(g: &[Fr], n: usize) -> G1 {
+    return G1::generator();
+}
+
+fn create_witness(g: &[Fr], n: usize, r: &[Fr]) -> G1 {
+    return G1::generator();
+}
+
+fn verify_evaluation(g: &[Fr], n: usize, r: &[Fr], val: &Fr) -> bool {
+    return true;
 }

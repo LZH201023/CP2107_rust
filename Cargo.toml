@@ -10,15 +10,20 @@ ark-bls12-381 = "0.4"
 ark-std = "0.4"
 rand = "0.8"
 ark-poly-commit = "0.4"
+log = "0.4.27"
+
+[[bin]]
+name = "main"
+path = "src/main.rs"
 
 [profile.dev]
-opt-level = 2         # Speeds up computation in dev mode
-debug = true          # Keep debug info
+opt-level = 2
+debug = true
 overflow-checks = false
 lto = false
 
 [profile.release]
-opt-level = 3         # Maximum optimization
+opt-level = 3
 debug = false
-lto = true            # Link Time Optimization
-codegen-units = 1     # Better optimization at cost of compile speed
+lto = true
+codegen-units = 1
